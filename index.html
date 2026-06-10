@@ -1,0 +1,1595 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>프로 FPS 에임 트레이너 (Aim Trainer Pro)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+    <!-- Three.js (3D Library) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #0b0f19;
+            user-select: none;
+        }
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+        /* 조준선 레이아웃 정밀 배치 */
+        #aim-crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            z-index: 10;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100px;
+            height: 100px;
+        }
+        .tab-btn.active {
+            border-bottom: 3px solid #3b82f6;
+            color: #3b82f6;
+        }
+    </style>
+</head>
+<body class="text-white relative">
+
+    <!-- 게임용 3D 캔버스 -->
+    <div id="canvas-container" class="w-full h-full absolute inset-0 z-0"></div>
+
+    <!-- 정밀 조준선 (Crosshair) - 기본값: 깔끔하고 명확한 점(Dot) 형태 -->
+    <div id="aim-crosshair">
+        <!-- 중앙 조준점 -->
+        <div id="crosshair-dot" class="bg-green-400 rounded-full transition-all duration-75 shadow-[0_0_8px_rgba(74,222,128,0.8)]" style="width: 6px; height: 6px;"></div>
+        <!-- 십자선 구성 요소 (초기 상태에는 Dot 모드로 인해 숨김 처리됨) -->
+        <div id="crosshair-left" class="absolute bg-green-400 transition-all duration-75" style="width: 8px; height: 2px; transform: translateX(-12px); display: none;"></div>
+        <div id="crosshair-right" class="absolute bg-green-400 transition-all duration-75" style="width: 8px; height: 2px; transform: translateX(12px); display: none;"></div>
+        <div id="crosshair-top" class="absolute bg-green-400 transition-all duration-75" style="width: 2px; height: 8px; transform: translateY(-12px); display: none;"></div>
+        <div id="crosshair-bottom" class="absolute bg-green-400 transition-all duration-75" style="width: 2px; height: 8px; transform: translateY(12px); display: none;"></div>
+    </div>
+
+    <!-- 화면에 나타나는 HUD 정보 -->
+    <div id="hud-container" class="absolute top-0 left-0 w-full p-6 flex justify-between items-start pointer-events-none z-10 hidden">
+        <!-- 실시간 스탯 정보 (좌측) -->
+        <div class="bg-gray-900/80 backdrop-blur-md px-6 py-4 rounded-xl border border-gray-800/80 flex gap-8 items-center">
+            <div>
+                <p class="text-gray-400 text-xs font-semibold uppercase tracking-wider">점수</p>
+                <p id="hud-score" class="text-3xl font-bold font-orbitron text-blue-400">0</p>
+            </div>
+            <div class="border-l border-gray-800 h-10"></div>
+            <div>
+                <p class="text-gray-400 text-xs font-semibold uppercase tracking-wider">적중률</p>
+                <p id="hud-accuracy" class="text-3xl font-bold font-orbitron text-green-400">100%</p>
+            </div>
+            <div class="border-l border-gray-800 h-10"></div>
+            <div>
+                <p class="text-gray-400 text-xs font-semibold uppercase tracking-wider">KPS (초당 타겟)</p>
+                <p id="hud-kps" class="text-3xl font-bold font-orbitron text-purple-400">0.0</p>
+            </div>
+        </div>
+
+        <!-- 남은 시간 타이머 (우측) -->
+        <div class="bg-gray-900/80 backdrop-blur-md px-6 py-4 rounded-xl border border-gray-800/80 flex flex-col items-end">
+            <p class="text-gray-400 text-xs font-semibold uppercase tracking-wider">남은 시간</p>
+            <p id="hud-timer" class="text-4xl font-extrabold font-orbitron text-red-400">45s</p>
+        </div>
+    </div>
+
+    <!-- 마우스 락 캡처 및 일시정지 가이드 -->
+    <div id="unlock-alert" class="absolute inset-0 bg-black/75 backdrop-blur-md flex flex-col justify-center items-center z-20 hidden">
+        <div class="bg-gray-900 border border-gray-800 p-8 rounded-2xl max-w-md text-center shadow-2xl">
+            <div class="w-16 h-16 bg-blue-500/10 text-blue-400 rounded-full flex items-center justify-center text-2xl mx-auto mb-4 animate-bounce">
+                <i class="fa-solid fa-mouse-pointer"></i>
+            </div>
+            <h3 class="text-2xl font-bold mb-2">화면이 일시정지되었습니다</h3>
+            <p class="text-gray-400 text-sm mb-6 leading-relaxed">
+                정밀한 1인칭 조준과 카메라 회전을 활성화하려면 아래 버튼을 클릭하여 조준경 잠금을 다시 켜주세요.
+            </p>
+            <button id="resume-btn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 rounded-xl transition duration-200 shadow-lg shadow-blue-500/20">
+                훈련 계속하기 (클릭)
+            </button>
+            <button id="exit-menu-btn" class="w-full mt-2 bg-gray-800 hover:bg-gray-700 text-gray-300 font-semibold py-3 rounded-xl transition duration-200">
+                메인 메뉴로 이동
+            </button>
+        </div>
+    </div>
+
+    <!-- 트래킹 타겟 체력바 오버레이 -->
+    <div id="tracking-hp" class="absolute top-[56%] left-1/2 -translate-x-1/2 w-32 h-2 bg-gray-800 border border-gray-700 rounded-full overflow-hidden pointer-events-none hidden z-10">
+        <div id="tracking-hp-bar" class="w-full h-full bg-blue-500 transition-all duration-75"></div>
+    </div>
+
+    <!-- MAIN MENU (초기화면 & 설정) -->
+    <div id="main-menu" class="absolute inset-0 bg-gray-950/90 backdrop-blur-lg flex items-center justify-center z-30">
+        <div class="container max-w-5xl mx-auto px-4 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+            
+            <!-- 왼쪽: 타이틀 및 모드 선택 -->
+            <div class="lg:col-span-7 flex flex-col space-y-6">
+                <div>
+                    <div class="inline-flex items-center gap-2 px-3 py-1 bg-blue-500/10 text-blue-400 rounded-full border border-blue-500/20 text-xs font-semibold uppercase tracking-wider mb-3">
+                        <i class="fa-solid fa-bullseye"></i> AI-GROUND FPS TRAINING SYSTEM
+                    </div>
+                    <h1 class="text-5xl lg:text-6xl font-black font-orbitron tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-purple-400">
+                        AIM TRAINER PRO
+                    </h1>
+                    <p class="text-gray-400 mt-2 text-sm lg:text-base">
+                        자신의 마우스 피지컬을 향상시키는 전문 훈련소입니다. 모드를 선택하고 마우스 좌클릭으로 사격하여 완벽한 에임을 단련하세요.
+                    </p>
+                </div>
+
+                <!-- 훈련 모드 리스트 -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <!-- 그리드샷 -->
+                    <div onclick="selectMode('gridshot')" id="mode-gridshot" class="mode-card cursor-pointer p-5 bg-gray-900 border-2 border-blue-500 rounded-xl hover:bg-gray-850/80 transition duration-300 flex flex-col justify-between h-44 group">
+                        <div>
+                            <span class="text-blue-400 text-xl"><i class="fa-solid fa-cubes"></i></span>
+                            <h3 class="font-bold text-lg mt-2 text-white">그리드샷</h3>
+                            <p class="text-gray-400 text-xs mt-1 leading-relaxed">화면에 생성된 3개의 타겟을 빠르고 정확하게 사격하여 순발력을 기릅니다.</p>
+                        </div>
+                        <span class="text-blue-500 text-xs font-semibold uppercase mt-2 group-hover:translate-x-1 transition-transform inline-block">선택됨 <i class="fa-solid fa-circle-check"></i></span>
+                    </div>
+
+                    <!-- 트래킹 -->
+                    <div onclick="selectMode('tracking')" id="mode-tracking" class="mode-card cursor-pointer p-5 bg-gray-900/50 border border-gray-800 rounded-xl hover:bg-gray-850/80 transition duration-300 flex flex-col justify-between h-44 group">
+                        <div>
+                            <span class="text-green-400 text-xl"><i class="fa-solid fa-wave-square"></i></span>
+                            <h3 class="font-bold text-lg mt-2 text-white">트래킹</h3>
+                            <p class="text-gray-400 text-xs mt-1 leading-relaxed">불규칙하게 끊임없이 이동하는 타겟에 조준점을 밀착하여 따라가는 힘을 훈련합니다.</p>
+                        </div>
+                        <span class="text-gray-500 text-xs font-semibold uppercase mt-2 group-hover:translate-x-1 transition-transform inline-block">선택 <i class="fa-solid fa-chevron-right"></i></span>
+                    </div>
+
+                    <!-- 반사 신경 -->
+                    <div onclick="selectMode('reflex')" id="mode-reflex" class="mode-card cursor-pointer p-5 bg-gray-900/50 border border-gray-800 rounded-xl hover:bg-gray-850/80 transition duration-300 flex flex-col justify-between h-44 group">
+                        <div>
+                            <span class="text-purple-400 text-xl"><i class="fa-solid fa-bolt"></i></span>
+                            <h3 class="font-bold text-lg mt-2 text-white">반사신경</h3>
+                            <p class="text-gray-400 text-xs mt-1 leading-relaxed">순간적으로 나타났다 사라지는 단 하나의 타겟을 향한 극강의 반응속도를 훈련합니다.</p>
+                        </div>
+                        <span class="text-gray-500 text-xs font-semibold uppercase mt-2 group-hover:translate-x-1 transition-transform inline-block">선택 <i class="fa-solid fa-chevron-right"></i></span>
+                    </div>
+                </div>
+
+                <!-- 시작 버튼 -->
+                <button id="start-game-btn" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-lg py-4 rounded-xl transition duration-200 transform hover:scale-[1.01] active:scale-[0.99] shadow-lg shadow-blue-500/20 font-orbitron">
+                    훈련 시작하기 (READY & PLAY)
+                </button>
+            </div>
+
+            <!-- 오른쪽: 설정 패널 -->
+            <div class="lg:col-span-5 bg-gray-900 border border-gray-800 p-6 rounded-2xl flex flex-col space-y-5 shadow-xl max-h-[85vh] overflow-y-auto">
+                <div class="flex items-center gap-2 border-b border-gray-800 pb-3">
+                    <span class="text-gray-400"><i class="fa-solid fa-sliders"></i></span>
+                    <h2 class="text-xl font-bold font-orbitron">사용자 설정 (SETTINGS)</h2>
+                </div>
+
+                <!-- 탭 메뉴 -->
+                <div class="flex gap-4 border-b border-gray-800 text-sm font-semibold">
+                    <button onclick="switchTab('game-settings')" id="tab-game-settings" class="tab-btn pb-2 text-blue-400 active">게임 감도 & FOV</button>
+                    <button onclick="switchTab('crosshair-settings')" id="tab-crosshair-settings" class="tab-btn pb-2 text-gray-400">조준점 커스텀</button>
+                </div>
+
+                <!-- 탭 1: 게임 설정 -->
+                <div id="pane-game-settings" class="space-y-4">
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-sm font-medium text-gray-300">마우스 감도 (Sensitivity)</label>
+                            <span id="sens-val" class="text-blue-400 font-bold font-orbitron text-sm">1.50</span>
+                        </div>
+                        <input type="range" id="input-sens" min="0.1" max="10" step="0.05" value="1.5" class="w-full accent-blue-500 bg-gray-800 rounded-lg appearance-none h-2">
+                        <p class="text-xs text-gray-500 mt-1">3D 시점 회전속도 민감도입니다.</p>
+                    </div>
+
+                    <div class="border-t border-gray-800 pt-3">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-sm font-medium text-gray-300">시야각 (FOV - Field of View)</label>
+                            <span id="fov-val" class="text-blue-400 font-bold font-orbitron text-sm">90</span>
+                        </div>
+                        <input type="range" id="input-fov" min="70" max="120" step="1" value="90" class="w-full accent-blue-500 bg-gray-800 rounded-lg appearance-none h-2">
+                        <p class="text-xs text-gray-500 mt-1">1인칭 렌더링 시야 왜곡 수준입니다. (일반 FPS 기본값: 90~103)</p>
+                    </div>
+
+                    <div class="border-t border-gray-800 pt-3">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-sm font-medium text-gray-300">사운드 볼륨</label>
+                            <span id="volume-val" class="text-blue-400 font-bold font-orbitron text-sm">70%</span>
+                        </div>
+                        <input type="range" id="input-volume" min="0" max="100" step="5" value="70" class="w-full accent-blue-500 bg-gray-800 rounded-lg appearance-none h-2">
+                    </div>
+                </div>
+
+                <!-- 탭 2: 조준점 커스텀 -->
+                <div id="pane-crosshair-settings" class="space-y-4 hidden">
+                    <!-- 조준점 타입 선택 -->
+                    <div>
+                        <label class="text-sm font-medium text-gray-300 mb-2 block">조준점 종류</label>
+                        <div class="grid grid-cols-3 gap-2">
+                            <button onclick="setCrosshairType('dot')" id="ct-dot" class="bg-blue-600 text-white text-xs py-2 rounded-lg font-semibold border border-blue-500">점 (Dot)</button>
+                            <button onclick="setCrosshairType('cross')" id="ct-cross" class="bg-gray-800 text-gray-400 text-xs py-2 rounded-lg font-semibold border border-transparent hover:bg-gray-700">십자선</button>
+                            <button onclick="setCrosshairType('combo')" id="ct-combo" class="bg-gray-800 text-gray-400 text-xs py-2 rounded-lg font-semibold border border-transparent hover:bg-gray-700">복합형</button>
+                        </div>
+                    </div>
+
+                    <!-- 색상 -->
+                    <div class="border-t border-gray-800 pt-3">
+                        <label class="text-sm font-medium text-gray-300 mb-2 block">조준점 색상</label>
+                        <div class="flex gap-2">
+                            <button onclick="setCrosshairColor('#4ade80', this)" class="w-8 h-8 rounded-full bg-green-400 border-2 border-white shadow-[0_0_8px_rgba(74,222,128,0.5)]"></button>
+                            <button onclick="setCrosshairColor('#3b82f6', this)" class="w-8 h-8 rounded-full bg-blue-500 hover:scale-110 transition-transform"></button>
+                            <button onclick="setCrosshairColor('#f43f5e', this)" class="w-8 h-8 rounded-full bg-rose-500 hover:scale-110 transition-transform"></button>
+                            <button onclick="setCrosshairColor('#facc15', this)" class="w-8 h-8 rounded-full bg-yellow-400 hover:scale-110 transition-transform"></button>
+                            <button onclick="setCrosshairColor('#ffffff', this)" class="w-8 h-8 rounded-full bg-white hover:scale-110 transition-transform"></button>
+                        </div>
+                    </div>
+
+                    <!-- 점 크기 -->
+                    <div class="border-t border-gray-800 pt-3" id="setting-dot-size">
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-sm font-medium text-gray-300">중앙 점 크기 (Dot Size)</label>
+                            <span id="ch-dot-size-val" class="text-blue-400 font-bold font-orbitron text-sm">6px</span>
+                        </div>
+                        <input type="range" id="input-ch-dot-size" min="2" max="16" step="1" value="6" class="w-full accent-blue-500 bg-gray-800 rounded-lg appearance-none h-2">
+                    </div>
+
+                    <!-- 십자선 옵션 (타입에 따라 동적으로 노출) -->
+                    <div id="crosshair-lines-options" class="hidden border-t border-gray-800 pt-3 space-y-3">
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="text-sm font-medium text-gray-300">십자선 선 길이 (Size)</label>
+                                <span id="ch-size-val" class="text-blue-400 font-bold font-orbitron text-sm">8px</span>
+                            </div>
+                            <input type="range" id="input-ch-size" min="2" max="25" step="1" value="8" class="w-full accent-blue-500 bg-gray-800 rounded-lg appearance-none h-2">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="text-sm font-medium text-gray-300">십자선 두께 (Thickness)</label>
+                                <span id="ch-thick-val" class="text-blue-400 font-bold font-orbitron text-sm">2px</span>
+                            </div>
+                            <input type="range" id="input-ch-thick" min="1" max="8" step="1" value="2" class="w-full accent-blue-500 bg-gray-800 rounded-lg appearance-none h-2">
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label class="text-sm font-medium text-gray-300">십자선 간격 (Gap)</label>
+                                <span id="ch-gap-val" class="text-blue-400 font-bold font-orbitron text-sm">10px</span>
+                            </div>
+                            <input type="range" id="input-ch-gap" min="0" max="25" step="1" value="10" class="w-full accent-blue-500 bg-gray-800 rounded-lg appearance-none h-2">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 최고 점수 목록 -->
+                <div class="bg-gray-950 p-4 rounded-xl border border-gray-800/80">
+                    <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-1">
+                        <i class="fa-solid fa-crown text-yellow-500"></i> 개별 모드 최고 기록 (PERSONAL BESTS)
+                    </h4>
+                    <div class="grid grid-cols-3 gap-2 text-center text-xs">
+                        <div class="bg-gray-900 p-2 rounded-lg">
+                            <div class="text-gray-500 font-semibold mb-1">그리드샷</div>
+                            <div id="pb-gridshot" class="font-bold text-blue-400 font-orbitron">0</div>
+                        </div>
+                        <div class="bg-gray-900 p-2 rounded-lg">
+                            <div class="text-gray-500 font-semibold mb-1">트래킹</div>
+                            <div id="pb-tracking" class="font-bold text-green-400 font-orbitron">0</div>
+                        </div>
+                        <div class="bg-gray-900 p-2 rounded-lg">
+                            <div class="text-gray-500 font-semibold mb-1">반사신경</div>
+                            <div id="pb-reflex" class="font-bold text-purple-400 font-orbitron">0ms</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- GAME OVER SCREEN (훈련 완료 리포트) -->
+    <div id="game-over-screen" class="absolute inset-0 bg-gray-950/95 backdrop-blur-md flex items-center justify-center z-30 hidden">
+        <div class="bg-gray-900 border border-gray-800 max-w-2xl w-full p-8 rounded-2xl shadow-2xl text-center m-4">
+            <span class="inline-flex p-3 bg-green-500/10 text-green-400 rounded-full text-3xl mb-4">
+                <i class="fa-solid fa-square-poll-vertical"></i>
+            </span>
+            <h2 class="text-3xl lg:text-4xl font-extrabold font-orbitron mb-1 tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-emerald-400">
+                훈련 완료 리포트
+            </h2>
+            <p id="over-mode-title" class="text-gray-400 text-sm mb-8 font-semibold uppercase tracking-widest">GRIDSHOT MODE</p>
+
+            <!-- 주요 수치 분석 그리드 -->
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                <div class="bg-gray-950 p-4 rounded-xl border border-gray-800">
+                    <p class="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-1">최종 점수</p>
+                    <p id="stat-score" class="text-2xl font-black font-orbitron text-blue-400">0</p>
+                </div>
+                <div class="bg-gray-950 p-4 rounded-xl border border-gray-800">
+                    <p class="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-1">적중률 (Accuracy)</p>
+                    <p id="stat-accuracy" class="text-2xl font-black font-orbitron text-green-400">0%</p>
+                </div>
+                <div class="bg-gray-950 p-4 rounded-xl border border-gray-800">
+                    <p class="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-1">초당 처리 수 (KPS)</p>
+                    <p id="stat-kps" class="text-2xl font-black font-orbitron text-purple-400">0.0</p>
+                </div>
+                <div class="bg-gray-950 p-4 rounded-xl border border-gray-800">
+                    <p id="stat-reactive-label" class="text-gray-500 text-xs font-semibold uppercase tracking-wider mb-1">평균 반응속도</p>
+                    <p id="stat-reactive" class="text-2xl font-black font-orbitron text-orange-400">0ms</p>
+                </div>
+            </div>
+
+            <!-- 디테일 분석 피드백 메시지 -->
+            <div class="bg-gray-950 p-5 rounded-xl border border-gray-800 text-left mb-8 flex gap-4 items-center">
+                <span class="text-yellow-500 text-2xl flex-shrink-0"><i class="fa-solid fa-wand-magic-sparkles animate-pulse"></i></span>
+                <div>
+                    <h4 class="font-bold text-sm text-gray-200">에임 마스터 AI의 종합 피드백</h4>
+                    <p id="ai-feedback" class="text-xs text-gray-400 mt-1 leading-relaxed">
+                        사격 시 떨림이 감지되었습니다. 마우스의 세밀한 그립을 유지하고 가로 감도를 조금 조절하는 편이 좋습니다.
+                    </p>
+                </div>
+            </div>
+
+            <!-- 액션 버튼 -->
+            <div class="flex flex-col sm:flex-row gap-4">
+                <button id="retry-game-btn" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl transition duration-200 shadow-lg shadow-blue-500/20 font-orbitron">
+                    <i class="fa-solid fa-arrows-rotate mr-1"></i> RESTART RUN
+                </button>
+                <button id="main-menu-btn" class="flex-1 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold py-4 rounded-xl transition duration-200 font-orbitron">
+                    <i class="fa-solid fa-home mr-1"></i> MAIN MENU
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AUDIO SYNTH ENGINE & THREE.JS LOGIC -->
+    <script>
+        // ==========================================
+        // 1. SOUND GENERATOR (Web Audio API)
+        // ==========================================
+        const AudioEngine = {
+            ctx: null,
+            volume: 0.7,
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+            },
+
+            setVolume(val) {
+                this.volume = val;
+            },
+
+            playShoot() {
+                this.init();
+                if (!this.ctx) return;
+
+                const dest = this.ctx.destination;
+                
+                // Gunshot Thump (Oscillator)
+                const osc = this.ctx.createOscillator();
+                const gainOsc = this.ctx.createGain();
+                
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(220, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(40, this.ctx.currentTime + 0.15);
+                
+                gainOsc.gain.setValueAtTime(this.volume * 0.4, this.ctx.currentTime);
+                gainOsc.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.15);
+                
+                // Fire noise crackle
+                const bufferSize = this.ctx.sampleRate * 0.1; 
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+                
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 1000;
+                
+                const gainNoise = this.ctx.createGain();
+                gainNoise.gain.setValueAtTime(this.volume * 0.5, this.ctx.currentTime);
+                gainNoise.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+
+                osc.connect(gainOsc);
+                gainOsc.connect(dest);
+
+                noise.connect(filter);
+                filter.connect(gainNoise);
+                gainNoise.connect(dest);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+                noise.start();
+                noise.stop(this.ctx.currentTime + 0.1);
+            },
+
+            playHit() {
+                this.init();
+                if (!this.ctx) return;
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(1000, this.ctx.currentTime);
+                osc.frequency.setValueAtTime(1200, this.ctx.currentTime + 0.05);
+
+                gain.gain.setValueAtTime(this.volume * 0.35, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.18);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.2);
+            },
+
+            playMiss() {
+                this.init();
+                if (!this.ctx) return;
+
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(120, this.ctx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(60, this.ctx.currentTime + 0.08);
+
+                gain.gain.setValueAtTime(this.volume * 0.2, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.08);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start();
+                osc.stop(this.ctx.currentTime + 0.1);
+            }
+        };
+
+
+        // ==========================================
+        // 2. STATE & CONFIGURATION
+        // ==========================================
+        let gameMode = 'gridshot'; // gridshot, tracking, reflex
+        let isPlaying = false;
+        let isPaused = false;
+        
+        let score = 0;
+        let totalShots = 0;
+        let hitShots = 0;
+        let kills = 0;
+        let startTime = 0;
+        let gameDuration = 45; 
+        let remainingTime = 45;
+        let gameTimerInterval = null;
+
+        // 반사신경 및 에임 분석 스탯들
+        let lastTargetSpawnTime = 0;
+        let reactionTimesSum = 0;
+        let trackedSuccessFrames = 0;
+        let totalTrackedFrames = 0;
+
+        // 개인 최고기록
+        let personalBests = {
+            gridshot: 0,
+            tracking: 0,
+            reflex: 99999 
+        };
+
+        // 로컬스토리지 복구
+        if (localStorage.getItem('pb_gridshot')) personalBests.gridshot = parseInt(localStorage.getItem('pb_gridshot'));
+        if (localStorage.getItem('pb_tracking')) personalBests.tracking = parseInt(localStorage.getItem('pb_tracking'));
+        if (localStorage.getItem('pb_reflex')) personalBests.reflex = parseInt(localStorage.getItem('pb_reflex'));
+
+        // ==========================================
+        // 3. UI ELEMENT EVENT BINDING & CROSSHAIR CONTROLLER
+        // ==========================================
+        let crosshairType = 'dot'; // 'dot', 'cross', 'combo'
+        let currentCrosshairColor = "#4ade80";
+
+        function selectMode(mode) {
+            gameMode = mode;
+            document.querySelectorAll('.mode-card').forEach(card => {
+                card.classList.remove('border-blue-500', 'bg-gray-900');
+                card.classList.add('border-gray-800', 'bg-gray-900/50');
+                card.querySelector('span:last-child').innerHTML = '선택 <i class="fa-solid fa-chevron-right"></i>';
+                card.querySelector('span:last-child').className = "text-gray-500 text-xs font-semibold uppercase mt-2 group-hover:translate-x-1 transition-transform inline-block";
+            });
+
+            const activeCard = document.getElementById(`mode-${mode}`);
+            activeCard.classList.remove('border-gray-800', 'bg-gray-900/50');
+            activeCard.classList.add('border-blue-500', 'bg-gray-900');
+            activeCard.querySelector('span:last-child').innerHTML = '선택됨 <i class="fa-solid fa-circle-check"></i>';
+            activeCard.querySelector('span:last-child').className = "text-blue-500 text-xs font-semibold uppercase mt-2 inline-block";
+        }
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active', 'text-blue-400'));
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.add('text-gray-400'));
+            
+            document.getElementById(`tab-${tabId}`).classList.add('active', 'text-blue-400');
+            
+            document.getElementById('pane-game-settings').classList.add('hidden');
+            document.getElementById('pane-crosshair-settings').classList.add('hidden');
+            document.getElementById(`pane-${tabId}`).classList.remove('hidden');
+        }
+
+        // 설정 바인딩
+        const sensInput = document.getElementById('input-sens');
+        const sensVal = document.getElementById('sens-val');
+        sensInput.addEventListener('input', () => {
+            sensVal.innerText = parseFloat(sensInput.value).toFixed(2);
+        });
+
+        const fovInput = document.getElementById('input-fov');
+        const fovVal = document.getElementById('fov-val');
+        fovInput.addEventListener('input', () => {
+            fovVal.innerText = fovInput.value;
+            if (camera) {
+                camera.fov = parseInt(fovInput.value);
+                camera.updateProjectionMatrix();
+            }
+        });
+
+        const volumeInput = document.getElementById('input-volume');
+        const volumeVal = document.getElementById('volume-val');
+        volumeInput.addEventListener('input', () => {
+            volumeVal.innerText = `${volumeInput.value}%`;
+            AudioEngine.setVolume(parseFloat(volumeInput.value) / 100);
+        });
+
+        // 조준선 커스터마이징 실시간 반영
+        const chSizeInput = document.getElementById('input-ch-size');
+        const chSizeVal = document.getElementById('ch-size-val');
+        const chThickInput = document.getElementById('input-ch-thick');
+        const chThickVal = document.getElementById('ch-thick-val');
+        const chGapInput = document.getElementById('input-ch-gap');
+        const chGapVal = document.getElementById('ch-gap-val');
+        const chDotSizeInput = document.getElementById('input-ch-dot-size');
+        const chDotSizeVal = document.getElementById('ch-dot-size-val');
+
+        function setCrosshairType(type) {
+            crosshairType = type;
+            document.querySelectorAll('#pane-crosshair-settings button[id^="ct-"]').forEach(btn => {
+                btn.classList.remove('bg-blue-600', 'text-white', 'border-blue-500');
+                btn.classList.add('bg-gray-800', 'text-gray-400', 'border-transparent');
+            });
+            const activeBtn = document.getElementById(`ct-${type}`);
+            activeBtn.classList.remove('bg-gray-800', 'text-gray-400', 'border-transparent');
+            activeBtn.classList.add('bg-blue-600', 'text-white', 'border-blue-500');
+
+            const lineOptions = document.getElementById('crosshair-lines-options');
+            const dotOption = document.getElementById('setting-dot-size');
+
+            if (type === 'dot') {
+                lineOptions.classList.add('hidden');
+                dotOption.classList.remove('hidden');
+            } else if (type === 'cross') {
+                lineOptions.classList.remove('hidden');
+                dotOption.classList.add('hidden');
+            } else {
+                lineOptions.classList.remove('hidden');
+                dotOption.classList.remove('hidden');
+            }
+
+            updateCrosshairUI();
+        }
+
+        function setCrosshairColor(hex, btnEl) {
+            currentCrosshairColor = hex;
+            // 모든 색상 단추의 테두리 하이라이트 일시 해제
+            document.querySelectorAll('#pane-crosshair-settings button[onclick^="setCrosshairColor"]').forEach(btn => {
+                btn.classList.remove('border-2', 'border-white');
+            });
+            
+            if (btnEl) {
+                // 이벤트를 통해 직접 누른 버튼인 경우 해당 버튼에 하이라이트 추가
+                btnEl.classList.add('border-2', 'border-white');
+            } else {
+                // 초기화면 실행 등 인자 없이 수동으로 색상을 주입한 경우, 속성을 역추적해 하이라이트 복원
+                document.querySelectorAll('#pane-crosshair-settings button[onclick^="setCrosshairColor"]').forEach(btn => {
+                    if (btn.getAttribute('onclick').includes(hex)) {
+                        btn.classList.add('border-2', 'border-white');
+                    }
+                });
+            }
+            updateCrosshairUI();
+        }
+
+        function updateCrosshairUI() {
+            const size = parseInt(chSizeInput.value);
+            const thick = parseInt(chThickInput.value);
+            const gap = parseInt(chGapInput.value);
+            const dotSize = parseInt(chDotSizeInput.value);
+
+            chSizeVal.innerText = `${size}px`;
+            chThickVal.innerText = `${thick}px`;
+            chGapVal.innerText = `${gap}px`;
+            chDotSizeVal.innerText = `${dotSize}px`;
+
+            const dotEl = document.getElementById('crosshair-dot');
+            const leftEl = document.getElementById('crosshair-left');
+            const rightEl = document.getElementById('crosshair-right');
+            const topEl = document.getElementById('crosshair-top');
+            const bottomEl = document.getElementById('crosshair-bottom');
+
+            // 색상 일괄 적용 및 그림자 네온 효과 부여
+            [dotEl, leftEl, rightEl, topEl, bottomEl].forEach(el => {
+                el.style.backgroundColor = currentCrosshairColor;
+                el.style.boxShadow = `0 0 8px ${currentCrosshairColor}`;
+            });
+
+            // 타입별 보이기/숨기기 및 기하 스타일링
+            if (crosshairType === 'dot') {
+                dotEl.style.display = 'block';
+                leftEl.style.display = 'none';
+                rightEl.style.display = 'none';
+                topEl.style.display = 'none';
+                bottomEl.style.display = 'none';
+            } else if (crosshairType === 'cross') {
+                dotEl.style.display = 'none';
+                leftEl.style.display = 'block';
+                rightEl.style.display = 'block';
+                topEl.style.display = 'block';
+                bottomEl.style.display = 'block';
+            } else if (crosshairType === 'combo') {
+                dotEl.style.display = 'block';
+                leftEl.style.display = 'block';
+                rightEl.style.display = 'block';
+                topEl.style.display = 'block';
+                bottomEl.style.display = 'block';
+            }
+
+            // 점 크기 가로세로 세팅
+            dotEl.style.width = `${dotSize}px`;
+            dotEl.style.height = `${dotSize}px`;
+
+            // 십자선 길이, 두께 및 오프셋 배치
+            leftEl.style.width = `${size}px`;
+            leftEl.style.height = `${thick}px`;
+            leftEl.style.transform = `translateX(-${gap + size/2}px)`;
+
+            rightEl.style.width = `${size}px`;
+            rightEl.style.height = `${thick}px`;
+            rightEl.style.transform = `translateX(${gap + size/2}px)`;
+
+            topEl.style.height = `${size}px`;
+            topEl.style.width = `${thick}px`;
+            topEl.style.transform = `translateY(-${gap + size/2}px)`;
+
+            bottomEl.style.height = `${size}px`;
+            bottomEl.style.width = `${thick}px`;
+            bottomEl.style.transform = `translateY(${gap + size/2}px)`;
+        }
+
+        [chSizeInput, chThickInput, chGapInput, chDotSizeInput].forEach(el => {
+            el.addEventListener('input', updateCrosshairUI);
+        });
+
+        // 최고점수 HUD 반영
+        function renderHighScores() {
+            document.getElementById('pb-gridshot').innerText = personalBests.gridshot;
+            document.getElementById('pb-tracking').innerText = personalBests.tracking;
+            document.getElementById('pb-reflex').innerText = personalBests.reflex === 99999 ? '0ms' : `${personalBests.reflex}ms`;
+        }
+        renderHighScores();
+
+
+        // ==========================================
+        // 4. THREE.JS 3D ENGINE SETUP
+        // ==========================================
+        let scene, camera, renderer;
+        let weaponGroup;
+        let targetGroup;
+        let particles = [];
+        let tracers = [];
+        let lightFlash;
+        let roomMesh; // 벽면 사격 탄착 지점 역산을 위해 전역 선언
+
+        // 마우스 카메라 회전 값
+        let yaw = 0;
+        let pitch = 0;
+
+        // 타겟 관리 구조체
+        let activeTargets = [];
+        let trackingTargetVelocity = new THREE.Vector3();
+        let trackingHP = 100;
+        let lastTrackingTime = 0;
+
+        // 경기장 크기 정의
+        const ROOM_WIDTH = 24;
+        const ROOM_HEIGHT = 12;
+        const ROOM_DEPTH = 15;
+
+        function init3D() {
+            const container = document.getElementById('canvas-container');
+            
+            // 씬 생성
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x0a0c16, 0.015);
+
+            // 카메라 생성 (FOV 연동)
+            camera = new THREE.PerspectiveCamera(parseInt(fovInput.value), window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.rotation.order = "YXZ"; 
+            scene.add(camera);
+
+            // 렌더러 생성
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // 조명 설정
+            const ambientLight = new THREE.AmbientLight(0x1a223f, 1.2);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0x4f46e5, 0.8);
+            dirLight.position.set(0, 10, -5);
+            dirLight.castShadow = true;
+            scene.add(dirLight);
+
+            // 사격 플래시 광원 (평소에는 강도가 0)
+            lightFlash = new THREE.PointLight(0xffaa44, 0, 15);
+            camera.add(lightFlash);
+            lightFlash.position.set(0.3, -0.2, -0.5);
+
+            // 룸 (훈련소 환경) 구축
+            buildTrainingRoom();
+
+            // 3D 총기 모델 로드
+            buildWeapon();
+
+            // 타겟 그룹 생성
+            targetGroup = new THREE.Group();
+            scene.add(targetGroup);
+
+            // 리사이즈 매핑
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // 네온 그리드 스타일 훈련소 구축
+        function buildTrainingRoom() {
+            // 바닥 그리드
+            const gridHelper = new THREE.GridHelper(60, 60, 0x3b82f6, 0x1e293b);
+            gridHelper.position.y = -4;
+            scene.add(gridHelper);
+
+            // 천장 그리드
+            const ceilingGrid = new THREE.GridHelper(60, 60, 0x4f46e5, 0x1e293b);
+            ceilingGrid.position.y = ROOM_HEIGHT - 4;
+            scene.add(ceilingGrid);
+
+            // 콘크리트 상자 형태의 벽면 제작
+            const materialWall = new THREE.MeshStandardMaterial({
+                color: 0x0e1324,
+                roughness: 0.8,
+                metalness: 0.2,
+                side: THREE.BackSide
+            });
+
+            // 룸 박스
+            const roomGeo = new THREE.BoxGeometry(ROOM_WIDTH, ROOM_HEIGHT, ROOM_DEPTH);
+            roomMesh = new THREE.Mesh(roomGeo, materialWall);
+            roomMesh.position.set(0, ROOM_HEIGHT/2 - 4, -ROOM_DEPTH/2 + 2);
+            roomMesh.receiveShadow = true;
+            scene.add(roomMesh);
+
+            // 정면 네온 보더라인 구축
+            const lineGeo = new THREE.BoxGeometry(16, 8, 0.1);
+            const edges = new THREE.EdgesGeometry(lineGeo);
+            const lineMat = new THREE.LineBasicMaterial({ color: 0x3b82f6, linewidth: 2 });
+            const borderLines = new THREE.LineSegments(edges, lineMat);
+            borderLines.position.set(0, 1, -ROOM_DEPTH + 2.5);
+            scene.add(borderLines);
+        }
+
+        // 1인칭 돌격소총(Rifle) 메쉬 구축
+        function buildWeapon() {
+            weaponGroup = new THREE.Group();
+
+            // 총 몸통
+            const receiverGeo = new THREE.BoxGeometry(0.06, 0.08, 0.4);
+            const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x151b26, roughness: 0.4, metalness: 0.9 });
+            const receiver = new THREE.Mesh(receiverGeo, darkMetalMat);
+            weaponGroup.add(receiver);
+
+            // 총열
+            const barrelGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.3);
+            barrelGeo.rotateX(Math.PI / 2);
+            const steelMat = new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 0.2, metalness: 1.0 });
+            const barrel = new THREE.Mesh(barrelGeo, steelMat);
+            barrel.position.set(0, 0.02, -0.3);
+            weaponGroup.add(barrel);
+
+            // 스코프/조준경
+            const scopeGeo = new THREE.CylinderGeometry(0.018, 0.018, 0.12);
+            scopeGeo.rotateX(Math.PI / 2);
+            const scope = new THREE.Mesh(scopeGeo, darkMetalMat);
+            scope.position.set(0, 0.06, -0.05);
+            weaponGroup.add(scope);
+
+            // 조준경 네온 렌즈
+            const lensGeo = new THREE.CircleGeometry(0.014, 16);
+            const lensMat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, side: THREE.DoubleSide });
+            const lens = new THREE.Mesh(lensGeo, lensMat);
+            lens.position.set(0, 0.06, -0.111);
+            weaponGroup.add(lens);
+
+            // 핸드가드 / 손잡이 부분
+            const gripGeo = new THREE.BoxGeometry(0.04, 0.12, 0.05);
+            gripGeo.rotateX(0.3);
+            const grip = new THREE.Mesh(gripGeo, darkMetalMat);
+            grip.position.set(0, -0.08, 0.05);
+            weaponGroup.add(grip);
+
+            // 총구 위치 오프셋 확보를 위한 타겟 노드
+            const muzzleNode = new THREE.Object3D();
+            muzzleNode.position.set(0, 0.02, -0.45);
+            weaponGroup.add(muzzleNode);
+            weaponGroup.userData = { muzzle: muzzleNode };
+
+            // 카메라 하단 오른쪽에 고정하여 완벽한 FPS 구도 연출
+            camera.add(weaponGroup);
+            resetWeaponPosition();
+        }
+
+        function resetWeaponPosition() {
+            // 조준 탄도가 중앙에 명확하게 맞아떨어지도록 축 정렬 조절
+            weaponGroup.position.set(0.16, -0.16, -0.38);
+            weaponGroup.rotation.set(0, 0, 0);
+        }
+
+
+        // ==========================================
+        // 5. TARGET MANAGEMENT (모드별 타겟 생성/로직)
+        // ==========================================
+        
+        function createTargetMesh(colorHex, emissiveHex, radius) {
+            const geo = new THREE.SphereGeometry(radius, 32, 32);
+            const mat = new THREE.MeshStandardMaterial({
+                color: colorHex,
+                emissive: emissiveHex,
+                emissiveIntensity: 0.6,
+                roughness: 0.1,
+                metalness: 0.8
+            });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true;
+            return mesh;
+        }
+
+        function clearAllTargets() {
+            while (activeTargets.length > 0) {
+                const target = activeTargets.pop();
+                targetGroup.remove(target.mesh);
+            }
+        }
+
+        function spawnTarget() {
+            if (!isPlaying) return;
+
+            if (gameMode === 'gridshot') {
+                const mesh = createTargetMesh(0x3b82f6, 0x1d4ed8, 0.45);
+                
+                let x, y;
+                let attempts = 0;
+                do {
+                    x = (Math.random() - 0.5) * 12; 
+                    y = (Math.random() - 0.5) * 5 + 1; 
+                    attempts++;
+                } while (checkTargetOverlap(x, y) && attempts < 10);
+
+                const z = -ROOM_DEPTH + 3; 
+                
+                mesh.position.set(x, y, z);
+                targetGroup.add(mesh);
+                
+                activeTargets.push({
+                    mesh: mesh,
+                    spawnTime: performance.now()
+                });
+            } 
+            else if (gameMode === 'tracking') {
+                const mesh = createTargetMesh(0x10b981, 0x047857, 0.6);
+                mesh.position.set(0, 1, -ROOM_DEPTH + 4);
+                targetGroup.add(mesh);
+                
+                trackingTargetVelocity.set(
+                    (Math.random() - 0.5) * 4,
+                    (Math.random() - 0.5) * 3,
+                    0
+                );
+                
+                activeTargets.push({
+                    mesh: mesh,
+                    spawnTime: performance.now(),
+                    isTracking: true
+                });
+
+                trackingHP = 100;
+                updateTrackingHPBar();
+            } 
+            else if (gameMode === 'reflex') {
+                const mesh = createTargetMesh(0x8b5cf6, 0x6d28d9, 0.35);
+                const x = (Math.random() - 0.5) * 11;
+                const y = (Math.random() - 0.5) * 4 + 1;
+                const z = -ROOM_DEPTH + 3;
+
+                mesh.position.set(x, y, z);
+                targetGroup.add(mesh);
+
+                const duration = 850; 
+                
+                activeTargets.push({
+                    mesh: mesh,
+                    spawnTime: performance.now(),
+                    expireTime: performance.now() + duration,
+                    isReflex: true
+                });
+
+                lastTargetSpawnTime = performance.now();
+            }
+        }
+
+        function checkTargetOverlap(x, y) {
+            for (let t of activeTargets) {
+                const dist = Math.hypot(t.mesh.position.x - x, t.mesh.position.y - y);
+                if (dist < 1.2) return true;
+            }
+            return false;
+        }
+
+        function updateTrackingHPBar() {
+            const hpContainer = document.getElementById('tracking-hp');
+            if (gameMode === 'tracking' && isPlaying && !isPaused) {
+                hpContainer.classList.remove('hidden');
+                document.getElementById('tracking-hp-bar').style.width = `${trackingHP}%`;
+            } else {
+                hpContainer.classList.add('hidden');
+            }
+        }
+
+
+        // ==========================================
+        // 6. 1인칭 컨트롤러 및 카메라 제어 (Pointer Lock)
+        // ==========================================
+        const resumeBtn = document.getElementById('resume-btn');
+        const exitMenuBtn = document.getElementById('exit-menu-btn');
+        const unlockAlert = document.getElementById('unlock-alert');
+
+        document.getElementById('canvas-container').addEventListener('click', () => {
+            if (isPlaying && !isPaused) {
+                document.body.requestPointerLock();
+            }
+        });
+
+        document.addEventListener('pointerlockchange', () => {
+            if (document.pointerLockElement === document.body) {
+                isPaused = false;
+                unlockAlert.classList.add('hidden');
+                if (AudioEngine.ctx) AudioEngine.ctx.resume();
+            } else {
+                if (isPlaying) {
+                    isPaused = true;
+                    unlockAlert.classList.remove('hidden');
+                }
+            }
+        });
+
+        resumeBtn.addEventListener('click', () => {
+            document.body.requestPointerLock();
+        });
+
+        exitMenuBtn.addEventListener('click', () => {
+            stopGame();
+            document.getElementById('main-menu').classList.remove('hidden');
+            unlockAlert.classList.add('hidden');
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement !== document.body || !isPlaying || isPaused) return;
+
+            const sens = parseFloat(sensInput.value) * 0.0006;
+            
+            yaw -= e.movementX * sens;
+            pitch -= e.movementY * sens;
+
+            const limit = Math.PI / 2.15; 
+            pitch = Math.max(-limit, Math.min(limit, pitch));
+
+            camera.rotation.y = yaw;
+            camera.rotation.x = pitch;
+        });
+
+
+        // ==========================================
+        // 7. 슈팅 메커니즘, 100% 동기화 탄도 & 이펙트
+        // ==========================================
+        
+        window.addEventListener('mousedown', (e) => {
+            if (document.pointerLockElement !== document.body || !isPlaying || isPaused) return;
+            if (e.button !== 0) return; 
+
+            shootWeapon();
+        });
+
+        function shootWeapon() {
+            totalShots++;
+            AudioEngine.playShoot();
+
+            // 총기 반동 애니메이션
+            weaponRecoilEffect();
+
+            // 정밀 레이캐스터로 정확한 화면 한가운데 (0,0) 좌표 레이 발사 (조준점 위치와 100% 일치)
+            const raycaster = new THREE.Raycaster();
+            raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+            // 타겟 교차 검사
+            const targetsToIntersect = activeTargets.map(t => t.mesh);
+            const intersects = raycaster.intersectObjects(targetsToIntersect);
+
+            let hitPoint = new THREE.Vector3();
+
+            if (intersects.length > 0) {
+                const hitObj = intersects[0].object;
+                hitPoint.copy(intersects[0].point);
+
+                const targetIdx = activeTargets.findIndex(t => t.mesh === hitObj);
+                if (targetIdx !== -1) {
+                    const targetInfo = activeTargets[targetIdx];
+
+                    if (gameMode === 'gridshot') {
+                        createHitParticles(hitPoint, 0x3b82f6);
+                        createImpactFlash(hitPoint); // 즉각적인 고품질 타격 스파크 생성
+                        AudioEngine.playHit();
+                        
+                        targetGroup.remove(hitObj);
+                        activeTargets.splice(targetIdx, 1);
+                        
+                        hitShots++;
+                        score += 100;
+                        kills++;
+                        
+                        spawnTarget(); 
+                    } 
+                    else if (gameMode === 'reflex') {
+                        const rt = performance.now() - targetInfo.spawnTime;
+                        reactionTimesSum += rt;
+                        
+                        createHitParticles(hitPoint, 0x8b5cf6);
+                        createImpactFlash(hitPoint);
+                        AudioEngine.playHit();
+
+                        targetGroup.remove(hitObj);
+                        activeTargets.splice(targetIdx, 1);
+
+                        hitShots++;
+                        score += 200; 
+                        kills++;
+
+                        spawnTarget();
+                    }
+                    else if (gameMode === 'tracking') {
+                        trackingHP -= 15;
+                        AudioEngine.playHit();
+                        createHitParticles(hitPoint, 0x10b981);
+                        createImpactFlash(hitPoint);
+                        
+                        if (trackingHP <= 0) {
+                            targetGroup.remove(hitObj);
+                            activeTargets.splice(targetIdx, 1);
+                            score += 300;
+                            kills++;
+                            spawnTarget();
+                        }
+                    }
+                }
+            } else {
+                // 타겟을 빗나간 경우: 화면 중앙 조준선이 가리키는 벽/바닥면의 정확한 3D 교차점을 찾아서 발사
+                AudioEngine.playMiss();
+                
+                const wallIntersects = raycaster.intersectObject(roomMesh);
+                if (wallIntersects.length > 0) {
+                    hitPoint.copy(wallIntersects[0].point);
+                } else {
+                    // 예외적인 허공 사격 처리 (전방 15유닛 지점 강제 고정)
+                    raycaster.ray.at(15, hitPoint);
+                }
+
+                createHitParticles(hitPoint, 0x475569);
+                createImpactFlash(hitPoint);
+            }
+
+            // 오차 없는 정렬 궤적(Tracer Line) 생성
+            createTracer(hitPoint);
+
+            // HUD 실시간 데이터 반영
+            updateHUD();
+        }
+
+        function weaponRecoilEffect() {
+            weaponGroup.position.z = -0.32;
+            weaponGroup.position.y = -0.13;
+            weaponGroup.rotation.x = 0.12;
+
+            lightFlash.intensity = 3.0;
+            setTimeout(() => {
+                lightFlash.intensity = 0;
+            }, 40);
+        }
+
+        // 궤적 생성 시스템 (오차 보정형)
+        function createTracer(targetPos) {
+            const muzzleWorldPos = new THREE.Vector3();
+            weaponGroup.userData.muzzle.getWorldPosition(muzzleWorldPos);
+
+            const material = new THREE.LineBasicMaterial({
+                color: 0xfff0aa,
+                transparent: true,
+                opacity: 0.9,
+                linewidth: 2
+            });
+
+            // 총구 -> 실제 탄착지점(조준점이 만난 3D 교차점)을 향해 100% 직진하는 라인 구성
+            const points = [muzzleWorldPos, targetPos];
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const line = new THREE.Line(geometry, material);
+            scene.add(line);
+
+            tracers.push({
+                line: line,
+                creationTime: performance.now(),
+                life: 75 
+            });
+        }
+
+        // 탄착점 즉각 반응형 고품질 임팩트 플래시 (충격파 네온 서클 추가)
+        function createImpactFlash(pos) {
+            // 1. 소형 백색 광섬광 구체
+            const geom = new THREE.SphereGeometry(0.12, 16, 16);
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 });
+            const mesh = new THREE.Mesh(geom, mat);
+            mesh.position.copy(pos);
+            scene.add(mesh);
+
+            // 2. 모드별 색상 맞춤형 충격파 링 구조
+            const ringGeom = new THREE.RingGeometry(0.01, 0.25, 32);
+            let ringColor = 0x3b82f6; // 그리드샷 파랑
+            if (gameMode === 'tracking') ringColor = 0x10b981; // 트래킹 초록
+            if (gameMode === 'reflex') ringColor = 0x8b5cf6; // 반사신경 보라
+
+            const ringMat = new THREE.MeshBasicMaterial({
+                color: ringColor,
+                side: THREE.DoubleSide,
+                transparent: true,
+                opacity: 0.8
+            });
+            const ring = new THREE.Mesh(ringGeom, ringMat);
+            ring.position.copy(pos);
+            ring.position.z += 0.01; // 벽면 겹침으로 인한 깜빡임 방지 보정
+            scene.add(ring);
+
+            // 소멸 소폭 모션 애프터이펙트 작동
+            let startTime = performance.now();
+            function animateSpark() {
+                let elapsed = performance.now() - startTime;
+                if (elapsed > 120) {
+                    scene.remove(mesh);
+                    scene.remove(ring);
+                    geom.dispose();
+                    mat.dispose();
+                    ringGeom.dispose();
+                    ringMat.dispose();
+                } else {
+                    let t = elapsed / 120;
+                    mesh.scale.setScalar(1 - t);
+                    ring.scale.setScalar(1 + t * 2.2);
+                    ringMat.opacity = 0.8 * (1 - t);
+                    requestAnimationFrame(animateSpark);
+                }
+            }
+            animateSpark();
+        }
+
+        function createHitParticles(origin, colorHex) {
+            const particleCount = 12;
+            const geom = new THREE.BoxGeometry(0.08, 0.08, 0.08);
+            const mat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 1.0 });
+
+            for (let i = 0; i < particleCount; i++) {
+                const mesh = new THREE.Mesh(geom, mat);
+                mesh.position.copy(origin);
+                scene.add(mesh);
+
+                const velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 6,
+                    (Math.random() - 0.5) * 6 + 1.5, 
+                    (Math.random() - 0.5) * 6
+                );
+
+                particles.push({
+                    mesh: mesh,
+                    vel: velocity,
+                    life: 400, 
+                    birth: performance.now()
+                });
+            }
+        }
+
+
+        // ==========================================
+        // 8. 실시간 메인 루프 (프레임 렌더링)
+        // ==========================================
+        let lastFrameTime = performance.now();
+
+        function animate(timestamp) {
+            requestAnimationFrame(animate);
+
+            const dt = (timestamp - lastFrameTime) / 1000;
+            lastFrameTime = timestamp;
+
+            if (isPlaying && !isPaused) {
+                // 총기 반동 후 원위치 부드러운 보간 복귀
+                weaponGroup.position.z += (-0.38 - weaponGroup.position.z) * 16 * dt;
+                weaponGroup.position.y += (-0.16 - weaponGroup.position.y) * 16 * dt;
+                weaponGroup.rotation.x += (0 - weaponGroup.rotation.x) * 16 * dt;
+                weaponGroup.rotation.y = -0.05;
+
+                updateActiveTargetsLogic(timestamp, dt);
+
+                // 사격 궤적 수명 관리
+                for (let i = tracers.length - 1; i >= 0; i--) {
+                    const tracer = tracers[i];
+                    const elapsed = timestamp - tracer.creationTime;
+                    if (elapsed > tracer.life) {
+                        scene.remove(tracer.line);
+                        tracer.line.geometry.dispose();
+                        tracers.splice(i, 1);
+                    } else {
+                        tracer.line.material.opacity = 1.0 - (elapsed / tracer.life);
+                    }
+                }
+
+                // 월드 물리 파티클 중력가속 업데이트
+                for (let i = particles.length - 1; i >= 0; i--) {
+                    const p = particles[i];
+                    const elapsed = timestamp - p.birth;
+                    if (elapsed > p.life) {
+                        scene.remove(p.mesh);
+                        p.mesh.geometry.dispose();
+                        particles.splice(i, 1);
+                    } else {
+                        p.mesh.position.addScaledVector(p.vel, dt);
+                        p.vel.y -= 9.8 * dt; 
+                        p.mesh.material.opacity = 1.0 - (elapsed / p.life);
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        function updateActiveTargetsLogic(timestamp, dt) {
+            let isTrackingCrosshairOn = false;
+
+            if (gameMode === 'tracking' && activeTargets.length > 0) {
+                const target = activeTargets[0];
+                const raycaster = new THREE.Raycaster();
+                raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+                const intersects = raycaster.intersectObject(target.mesh);
+
+                totalTrackedFrames++;
+
+                if (intersects.length > 0) {
+                    isTrackingCrosshairOn = true;
+                    trackedSuccessFrames++;
+
+                    // 실시간 트래킹 도중 체력 틱 차감
+                    trackingHP -= 55 * dt;
+                    
+                    if (Math.random() < 0.3) {
+                        createHitParticles(intersects[0].point, 0x10b981);
+                        if (Math.random() < 0.1) AudioEngine.playHit();
+                    }
+
+                    if (trackingHP <= 0) {
+                        createHitParticles(target.mesh.position, 0x10b981);
+                        createImpactFlash(target.mesh.position);
+                        AudioEngine.playHit();
+                        targetGroup.remove(target.mesh);
+                        activeTargets.pop();
+                        
+                        hitShots++;
+                        score += 150;
+                        kills++;
+
+                        spawnTarget();
+                    }
+                }
+                updateTrackingHPBar();
+            }
+
+            // 타겟 무빙 제어
+            for (let i = activeTargets.length - 1; i >= 0; i--) {
+                const target = activeTargets[i];
+
+                if (target.isTracking) {
+                    target.mesh.position.addScaledVector(trackingTargetVelocity, dt);
+
+                    if (Math.abs(target.mesh.position.x) > 6.5) {
+                        trackingTargetVelocity.x *= -1;
+                        target.mesh.position.x = Math.sign(target.mesh.position.x) * 6.5;
+                    }
+                    if (target.mesh.position.y > 4.5 || target.mesh.position.y < -1.5) {
+                        trackingTargetVelocity.y *= -1;
+                        target.mesh.position.y = Math.max(-1.5, Math.min(4.5, target.mesh.position.y));
+                    }
+
+                    if (timestamp - target.spawnTime > lastTrackingTime + 1200) {
+                        trackingTargetVelocity.set(
+                            (Math.random() - 0.5) * 7.5,
+                            (Math.random() - 0.5) * 5.5,
+                            0
+                        );
+                        lastTrackingTime = timestamp;
+                    }
+                }
+
+                if (target.isReflex) {
+                    const timeLeft = target.expireTime - timestamp;
+                    if (timeLeft <= 0) {
+                        targetGroup.remove(target.mesh);
+                        activeTargets.splice(i, 1);
+                        
+                        totalShots++; 
+                        AudioEngine.playMiss();
+                        
+                        spawnTarget();
+                        updateHUD();
+                    } else {
+                        const scale = Math.max(0.1, timeLeft / (target.expireTime - target.spawnTime));
+                        target.mesh.scale.setScalar(scale);
+                    }
+                }
+            }
+        }
+
+
+        // ==========================================
+        // 9. GAME PLAYSTATE CONTROLLER (시작 / 종료)
+        // ==========================================
+        const startGameBtn = document.getElementById('start-game-btn');
+        const mainMenu = document.getElementById('main-menu');
+        const gameOverScreen = document.getElementById('game-over-screen');
+        const retryGameBtn = document.getElementById('retry-game-btn');
+        const backToMainMenuBtn = document.getElementById('main-menu-btn');
+
+        startGameBtn.addEventListener('click', startNewRun);
+        retryGameBtn.addEventListener('click', startNewRun);
+        
+        backToMainMenuBtn.addEventListener('click', () => {
+            gameOverScreen.classList.add('hidden');
+            mainMenu.classList.remove('hidden');
+        });
+
+        function startNewRun() {
+            AudioEngine.init();
+
+            mainMenu.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            document.getElementById('hud-container').classList.remove('hidden');
+
+            score = 0;
+            totalShots = 0;
+            hitShots = 0;
+            kills = 0;
+            remainingTime = gameDuration;
+            
+            reactionTimesSum = 0;
+            trackedSuccessFrames = 0;
+            totalTrackedFrames = 0;
+
+            isPlaying = true;
+            isPaused = false;
+            yaw = 0;
+            pitch = 0;
+            camera.rotation.set(0,0,0);
+
+            clearAllTargets();
+            
+            if (gameMode === 'gridshot') {
+                spawnTarget();
+                spawnTarget();
+                spawnTarget();
+            } else {
+                spawnTarget();
+            }
+
+            // 마우스 락 시동
+            setTimeout(() => {
+                document.body.requestPointerLock();
+            }, 100);
+
+            updateHUD();
+            document.getElementById('hud-timer').innerText = `${remainingTime}s`;
+            clearInterval(gameTimerInterval);
+            gameTimerInterval = setInterval(() => {
+                if (!isPaused) {
+                    remainingTime--;
+                    document.getElementById('hud-timer').innerText = `${remainingTime}s`;
+
+                    if (remainingTime <= 0) {
+                        endRun();
+                    }
+                }
+            }, 1000);
+        }
+
+        function updateHUD() {
+            document.getElementById('hud-score').innerText = score;
+            
+            let acc = 100;
+            if (gameMode === 'tracking') {
+                acc = totalTrackedFrames > 0 ? Math.round((trackedSuccessFrames / totalTrackedFrames) * 100) : 100;
+            } else {
+                acc = totalShots > 0 ? Math.round((hitShots / totalShots) * 100) : 100;
+            }
+            document.getElementById('hud-accuracy').innerText = `${acc}%`;
+
+            const timePassed = gameDuration - remainingTime;
+            const kps = timePassed > 0 ? (kills / timePassed).toFixed(1) : "0.0";
+            document.getElementById('hud-kps').innerText = kps;
+
+            updateTrackingHPBar();
+        }
+
+        function endRun() {
+            isPlaying = false;
+            clearInterval(gameTimerInterval);
+            document.exitPointerLock();
+
+            document.getElementById('hud-container').classList.add('hidden');
+            document.getElementById('tracking-hp').classList.add('hidden');
+
+            gameOverScreen.classList.remove('hidden');
+
+            const overTitle = document.getElementById('over-mode-title');
+            if (gameMode === 'gridshot') overTitle.innerText = "GRIDSHOT MODE REPORT";
+            if (gameMode === 'tracking') overTitle.innerText = "TRACKING MODE REPORT";
+            if (gameMode === 'reflex') overTitle.innerText = "REFLEX MODE REPORT";
+
+            document.getElementById('stat-score').innerText = score;
+            
+            let finalAcc = 0;
+            if (gameMode === 'tracking') {
+                finalAcc = totalTrackedFrames > 0 ? Math.round((trackedSuccessFrames / totalTrackedFrames) * 100) : 0;
+            } else {
+                finalAcc = totalShots > 0 ? Math.round((hitShots / totalShots) * 100) : 0;
+            }
+            document.getElementById('stat-accuracy').innerText = `${finalAcc}%`;
+
+            const finalKps = (kills / gameDuration).toFixed(2);
+            document.getElementById('stat-kps').innerText = finalKps;
+
+            const reactiveLabel = document.getElementById('stat-reactive-label');
+            const reactiveValue = document.getElementById('stat-reactive');
+
+            if (gameMode === 'reflex') {
+                reactiveLabel.innerText = "평균 반응 속도";
+                const avgReact = kills > 0 ? Math.round(reactionTimesSum / kills) : 0;
+                reactiveValue.innerText = `${avgReact}ms`;
+
+                if (avgReact > 0 && avgReact < personalBests.reflex) {
+                    personalBests.reflex = avgReact;
+                    localStorage.setItem('pb_reflex', avgReact);
+                }
+            } 
+            else if (gameMode === 'tracking') {
+                reactiveLabel.innerText = "총 트래킹 프레임";
+                reactiveValue.innerText = `${trackedSuccessFrames} F`;
+
+                if (score > personalBests.tracking) {
+                    personalBests.tracking = score;
+                    localStorage.setItem('pb_tracking', score);
+                }
+            } 
+            else {
+                reactiveLabel.innerText = "타겟 파괴 개수";
+                reactiveValue.innerText = `${kills}개`;
+
+                if (score > personalBests.gridshot) {
+                    personalBests.gridshot = score;
+                    localStorage.setItem('pb_gridshot', score);
+                }
+            }
+
+            renderHighScores();
+            buildAIFeedback(finalAcc, finalKps);
+            clearAllTargets();
+        }
+
+        function stopGame() {
+            isPlaying = false;
+            clearInterval(gameTimerInterval);
+            document.exitPointerLock();
+            document.getElementById('hud-container').classList.add('hidden');
+            document.getElementById('tracking-hp').classList.add('hidden');
+            clearAllTargets();
+        }
+
+        function buildAIFeedback(acc, kps) {
+            const fbText = document.getElementById('ai-feedback');
+            
+            if (gameMode === 'gridshot') {
+                if (acc >= 90 && kps >= 1.5) {
+                    fbText.innerText = "우수합니다! 매우 정교하고 가속적인 텐션을 소유하고 있습니다. 마우스 감도가 당신의 손과 완벽히 동기화되어 있습니다.";
+                } else if (acc >= 75) {
+                    fbText.innerText = "양호한 수준입니다. 속도를 높이기 전에 미세조정에만 조금 더 신경써보세요. 천천히 정확히 맞추는 훈련을 진행하면 KPS가 자연히 오릅니다.";
+                } else {
+                    fbText.innerText = "탄착군 분산이 심합니다. 마우스 감도(Sensitivity)를 0.2 ~ 0.5 정도 낮춘 뒤 가벼운 마우스 그립으로 부드러운 플릭 조준을 권장합니다.";
+                }
+            } 
+            else if (gameMode === 'tracking') {
+                if (acc >= 60) {
+                    fbText.innerText = "안정적인 추적 능력을 지녔습니다. 타겟의 기습 가속 및 튕김 국면에서도 조준점이 잘 흔들리지 않고 표적을 밀착 추종했습니다.";
+                } else if (acc >= 35) {
+                    fbText.innerText = "타겟 추적 중 뒤늦게 마우스가 따라가는 레이턴시가 발생합니다. 시야의 초점을 조준선이 아니라 가만히 타겟 자체에 맞추어 집중해 보세요.";
+                } else {
+                    fbText.innerText = "추적율이 대단히 저조합니다. 마우스 패드 공간이 너무 좁거나 마우스를 쥔 손목에 힘이 너무 과하게 들어갔을 가능성이 큽니다.";
+                }
+            } 
+            else { 
+                const avgReact = kills > 0 ? Math.round(reactionTimesSum / kills) : 0;
+                if (avgReact > 0 && avgReact <= 320) {
+                    fbText.innerText = "와우! 최고 수준의 반사신경입니다. 반응속도가 0.3초 내외인 최정상급 텐션입니다. 실전 교전에서 무조건 선제 타격을 보장합니다.";
+                } else {
+                    fbText.innerText = "순간 타겟 포착력이 조금 부족합니다. 시야각(FOV)을 95 내외로 조정하여 타겟의 인지적 크기를 상대적으로 늘려보는 설정을 권장합니다.";
+                }
+            }
+        }
+
+
+        // ==========================================
+        // 10. INITIALIZATION RUN
+        // ==========================================
+        window.onload = function() {
+            init3D();
+            
+            // 초기 점(Dot) 모드로 UI 강제 리인덱스 설정 및 동기화
+            setCrosshairType('dot');
+            setCrosshairColor('#4ade80');
+            
+            // 애니메이션 가동
+            animate(performance.now());
+        };
+
+    </script>
+</body>
+</html>
